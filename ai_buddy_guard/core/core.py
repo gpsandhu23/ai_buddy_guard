@@ -25,24 +25,51 @@ logging.basicConfig(level=logging.INFO)
 
 @tool
 def check_credentials_in_repo(git_repo: str) -> str:
-    """Please always use this function to check if a git repository has any security issues due to leaked credentials
-    Leaked credentials can be a big security issue"""
+    """
+    This function checks a given git repository for any leaked credentials.
+    
+    Leaked credentials in a repository can pose a significant security risk. This function uses the scan_git_secrets method
+    to scan the repository and return any findings.
+    
+    Parameters:
+    git_repo (str): The URL of the git repository to check.
+    
+    Returns:
+    results (str): The results of the scan for leaked credentials.
+    """
     results = scan_git_secrets(git_repo)
     return results
 
 @tool
 def check_git_depdency_cves(git_repo:str) -> str:
-    """Please use this tool to check for security issues in a git repo due to potential vulnerabilities due to out of date dependencies.
-    Use this tool if you need to check for any out of date dependencies with security issues"""
+    """
+    This function checks a given git repository for potential vulnerabilities due to out-of-date dependencies.
+    
+    Out-of-date dependencies can have known security vulnerabilities that pose a risk to the repository. This function uses
+    the get_dependabot_alert method to check the repository's dependencies and return any findings.
+    
+    Parameters:
+    git_repo (str): The URL of the git repository to check.
+    
+    Returns:
+    results (str): The results of the check for out-of-date dependencies with security issues.
+    """
     results = get_dependabot_alert(git_repo)
     return results
 
 @tool
 def invalidate_aws_key(access_key: str) -> str:
-    """Please always use this tool if you find any leaked AWS credentials to fix security issue.
-    It returns 'AWS Key invalidated successfully' if it worked
-    It returns 'No user found for the given access key' if the use for this key doesn't exist. This happens if the key is already invalidated.
-    Please pass the string for the key in the following format: 'AKIAxxxxxxxxxxxxx'
+    """
+    This function invalidates a given AWS access key to mitigate the security risk associated with leaked credentials.
+    
+    If the operation is successful, it returns 'AWS Key invalidated successfully'.
+    If the user associated with the key doesn't exist (which may occur if the key is already invalidated), it returns 'No user found for the given access key'.
+    
+    Parameters:
+    access_key (str): The AWS access key to invalidate. It should be in the format: 'AKIAxxxxxxxxxxxxx'.
+    
+    Returns:
+    response (str): The result of the key invalidation operation.
     """
     iam_client = boto3.client('iam')
     user_name = get_user_name_from_access_key(iam_client, access_key)
@@ -57,9 +84,17 @@ slack_token = os.getenv("slack_api_key")
 
 @tool
 def inform_SOC(message: str) -> str:
-    """Use this tool to notify the security operation center if any security issues are found.
-    Returns 'Message posted successfully' if message is delivered and 
-    'Error posting message' if there are any issues notifying the security operation center.
+    """
+    This function sends a notification to the security operation center (SOC) when a security issue is detected.
+    
+    If the message is delivered successfully, it returns 'Message posted successfully'.
+    If there are any issues in notifying the SOC, it returns 'Error posting message'.
+    
+    Parameters:
+    message (str): The message to be sent to the SOC.
+    
+    Returns:
+    response (str): The result of the message delivery operation.
     """
     client = WebClient(token=slack_token)
 
@@ -126,7 +161,17 @@ def check_aws_mfa(account: str) -> list:
     return users_without_mfa
 
 def run_ai_bot(user_input):
-    """Run the AI bot"""
+    """
+    This function initializes and runs the AI bot with a set of predefined tools. 
+    These tools include checking credentials in a repository, checking for outdated dependencies in a git repository,
+    checking for public S3 buckets, checking for AWS users without MFA, and invalidating leaked AWS keys.
+    
+    Parameters:
+    user_input (str): The instruction for the AI bot to execute.
+    
+    Returns:
+    result: The result of the executed instruction.
+    """
     agent_instruction = user_input
     llm = ChatOpenAI(temperature=0)
     tools = load_tools([], llm=llm)
