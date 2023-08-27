@@ -15,14 +15,15 @@ Buddy Guard is a prototype AI agent to test how well AI can help us find and fix
 
 ### Prerequisites
 
-- Docker
-- GitHub Personal Access Token for GitHub-related features
+- **Docker**
+- **GitHub Personal Access Token for GitHub-related features**
+- **AWS tokens for AWS-related features**
 
 ### Steps
 
 ```bash
 # Clone the repository
-git clone "repo"
+git clone https://github.com/gpsandhu23/ai_buddy_guard.git
 
 # Navigate to the directory
 cd aibuddyguard
