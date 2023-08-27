@@ -1,0 +1,52 @@
+# Compiled Python files
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+
+# Environment variables
+.env
+
+# Cache files
+*.cache
+.cache/
+
+# Docker files
+*.dockerignore
+*.dockerenv
+
+# Python virtual environments
+venv/
+*.venv
+venv.bak/
+.env/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*.swn
+*.bak
+
+# macOS files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Temporary files
+*.tmp
+*.temp
+*.t
+*.bak
+
+# Log files
+*.log
+
+# Test output
+test_output/
+
+# Other
+*.egg-info/
+dist/
+build/

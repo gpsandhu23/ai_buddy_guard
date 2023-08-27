@@ -1,0 +1,10 @@
+streamlit
+streamlit-extras
+streamlit-option-menu
+pytest
+openai
+langchain
+trufflehog
+PyGithub
+boto3
+slack_sdk

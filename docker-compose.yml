@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  web_app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/ai_buddy_guard
+    ports:
+      - 8501:8501
+    command: streamlit run ai_buddy_guard/web_app/Buddy_Guard.py
+    environment:
+      - PYTHONPATH=/ai_buddy_guard
+    env_file:
+      - .env
+
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/ai_buddy_guard
+    command: pytest
+    environment:
+      - PYTHONPATH=/ai_buddy_guard
+    env_file:
+      - .env
