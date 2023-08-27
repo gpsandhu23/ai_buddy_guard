@@ -6,10 +6,10 @@ Buddy Guard is a prototype AI agent to test how well AI can help us find and fix
 
 ## Features
 
-- **Code Scanning**: Uses AI algorithms to scan your codebase for security issues.
-- **Cloud Security**: Checks for AWS S3 bucket vulnerabilities and more.
-- **Easy to Use**: Simple web interface to get you started without any hassle.
-- **Automated Fixes**: Offers suggestions and automated fixes for detected vulnerabilities.
+- **Secret Scanning**: Finds any leaked crdentials in your code
+- **Out of date dependencies**: Finds any vulnerable dependencies in your git repo
+- **Open S3 buckets**: Checks for any open AWS S3 buckets
+- **Missing MFA for AWS**: Find users that don't have MFA enabled on AWS
 
 ## Installation
 
