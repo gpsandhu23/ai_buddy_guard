@@ -19,6 +19,9 @@ from .utils import (
     get_user_name_from_access_key,
     is_bucket_public,
     scan_git_secrets,
+    extract_content_from_url,
+    incident_extractor_tool
+
 )
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
@@ -160,6 +163,23 @@ def check_aws_mfa(account: str) -> list:
 
     return users_without_mfa
 
+@tool
+def extract_incident_schema(incident_url: str) -> dict:
+    """
+    This function extracts interesting insights about an incident from a given URL.
+
+    The insights are returned as a dictionary, which can include various details about the incident such as the type of incident, the entities involved, the impact, and any remedial actions taken.
+
+    Parameters:
+    incident_url (str): The URL from which to extract incident insights.
+
+    Returns:
+    insights (dict): A dictionary containing interesting insights about the incident.
+    """
+    incident_content = extract_content_from_url(incident_url)
+    incident_dict = incident_extractor_tool(incident_content)
+    return incident_dict
+
 def run_ai_bot(user_input):
     """
     This function initializes and runs the AI bot with a set of predefined tools. 
@@ -177,7 +197,7 @@ def run_ai_bot(user_input):
     tools = load_tools([], llm=llm)
 
     agent= initialize_agent(
-        tools + [check_credentials_in_repo] + [check_git_depdency_cves] + [get_public_buckets] + [check_aws_mfa] + [invalidate_aws_key], 
+        tools + [check_credentials_in_repo] + [check_git_depdency_cves] + [get_public_buckets] + [check_aws_mfa] + [invalidate_aws_key] + [extract_incident_schema], 
         llm, 
         agent=AgentType.OPENAI_FUNCTIONS,
         handle_parsing_errors=True,

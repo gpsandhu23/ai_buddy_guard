@@ -8,3 +8,4 @@ trufflehog
 PyGithub
 boto3
 slack_sdk
+beautifulsoup4

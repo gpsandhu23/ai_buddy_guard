@@ -15,6 +15,9 @@ from botocore.exceptions import BotoCoreError, ClientError
 from git import Repo
 from git.exc import GitCommandError
 from github import Github
+from bs4 import BeautifulSoup
+from langchain.chat_models import ChatOpenAI
+from langchain.schema import HumanMessage
 
 # Local module imports
 
@@ -212,3 +215,100 @@ def is_bucket_public(s3_client: Any, bucket_name: str) -> bool:
         return False
 
     return False
+
+def extract_content_from_url(url):
+    headers = {
+        'User-Agent': 'AI Buddy Guard - Security Incident Schema Extractor'
+    }
+    
+    response = requests.get(url, headers=headers)
+    
+    if response.status_code == 200:
+        soup = BeautifulSoup(response.text, 'html.parser')
+        content = soup.get_text()
+        return content
+    else:
+        print('Failed to fetch the webpage. Status code:', response.status_code)
+        return None
+
+llm_model = "gpt-4-0613"
+temperature = 0
+llm = ChatOpenAI(model=llm_model, temperature=temperature)
+
+incident_schema = [
+            {
+                "name": "Incident_schema_extractor",
+                "description": "Extract information about security incidents from text",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "incident date": {
+                            "description": "Date when the incident occured or 'Unknown' if it is not clear",
+                        },
+                        "adversary": {
+                            "type": "string",
+                            "description": "Adversary group that caused the incident or 'Unknown' if it is not clear",
+                        },
+                        "adversary type": {
+                            "type": "string",
+                            "description": "The type of adversary group",
+                            "enum": ["Nation State", "E-Criminal", "Hacktavist", "Researcher", "Unknown"]
+                        },
+                        "victim": {
+                            "type": "string",
+                            "description": "The company that was the victim of the security incident or 'Unknown' if it is not clear"
+                        },
+                        "victim industry": {
+                            "type": "string",
+                            "description": "The industry the victim falls into"
+                        },
+                        "adversary behavior": {
+                            "type": "string",
+                            "description": "Step by step explaination for what adversary did"
+                        },
+                        "initial access": {
+                            "type": "string",
+                            "description": "Intial access technique used by adversary"
+                        },
+                        "final goal": {
+                            "type": "string",
+                            "description": "What was the final goal of the adversary"
+                        },
+                        "auth related": {
+                            "type": "string",
+                            "description": "Is the issue related to authentication",
+                            "enum": ["Yes", "No", "Unknown"]
+                        },
+                        "dependency related": {
+                            "type": "string",
+                            "description": "Is the incident related to 3rd party dependency",
+                            "enum": ["Yes", "No", "Unknown"]
+                        },
+                        "prevention strategy": {
+                            "type": "string",
+                            "description": "How can I prevent this from happening to my company"
+                        },
+                    },
+                    "required": ["adversary", "adversary type", "victim", "victim industry",  "adversary behavior", "initial access", "final goal", "auth related", "dependency related", "prevention strategy"],
+                }
+            }
+        ]
+
+def incident_extractor_tool(report):
+    first_response = llm.predict_messages([HumanMessage(content=report)],
+                                          functions=incident_schema)
+
+    content = first_response.content
+    function_call = first_response.additional_kwargs.get('function_call')
+
+    if function_call is not None:
+        content = function_call.get('arguments', content)
+
+    try:
+        content_dict = json.loads(content)
+        print("Content dict: ", content_dict)
+        return content_dict
+    except json.JSONDecodeError:
+        print(f"Warning: Could not parse JSON content: {content}")
+        print(f"Content that caused the error: {report}")
+        return None
