@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+from typing import List, Union
 
 # Third-party imports
 import boto3
@@ -11,6 +12,7 @@ from slack_sdk.errors import SlackApiError
 from langchain.agents import AgentType, initialize_agent, load_tools
 from langchain.chat_models import ChatOpenAI
 from langchain.tools import StructuredTool, tool
+import pandas as pd
 
 # Local (or relative) imports
 from .utils import (
@@ -180,6 +182,43 @@ def extract_incident_schema(incident_url: str) -> dict:
     incident_dict = incident_extractor_tool(incident_content)
     return incident_dict
 
+@tool
+def check_cve_in_kev(cve_string: str) -> Union[List[str], str]:
+    """
+    This function checks if a list of CVEs is actively being exploited in the wild and is part of the KEV list.
+    It prioritizes CVEs that are being exploited in the wild as they pose a significant security risk.
+    The function returns a list of exploited CVEs or an empty list if none are found.
+
+    Parameters:
+    cve_string (str): A string of CVEs separated by commas.
+
+    Returns:
+    exploited_cves (Union[List[str], str]): A list of CVEs that are being exploited in the wild or an error message if an error occurs.
+    """
+    cisa_kev_url = "https://www.cisa.gov/sites/default/files/csv/known_exploited_vulnerabilities.csv"
+    
+    try:
+        df = pd.read_csv(cisa_kev_url)
+    except Exception as e:
+        logging.error(f"Error occurred while reading CSV: {e}")
+        return f"Error occurred while reading CSV: {e}"
+    
+    if 'cveID' not in df.columns:
+        logging.error("Error: 'CVE' column not found in DataFrame")
+        return "Error: 'CVE' column not found in DataFrame"
+
+    try:
+        cve_list = [cve.strip() for cve in cve_string.split(",")]
+    except Exception as e:
+        logging.error(f"Error occurred while splitting the CVE string: {e}")
+        return f"Error occurred while splitting the CVE string: {e}"
+
+    exploited_cves = [cve for cve in cve_list if cve in df['cveID'].values]
+    logging.info(f"Exploited CVEs found: {exploited_cves}")
+
+    return exploited_cves
+
+
 def run_ai_bot(user_input):
     """
     This function initializes and runs the AI bot with a set of predefined tools. 
@@ -197,7 +236,8 @@ def run_ai_bot(user_input):
     tools = load_tools([], llm=llm)
 
     agent= initialize_agent(
-        tools + [check_credentials_in_repo] + [check_git_depdency_cves] + [get_public_buckets] + [check_aws_mfa] + [invalidate_aws_key] + [extract_incident_schema], 
+        tools + [check_credentials_in_repo] + [check_git_depdency_cves] + [get_public_buckets] + [check_aws_mfa] 
+        + [invalidate_aws_key] + [extract_incident_schema] + [check_cve_in_kev], 
         llm, 
         agent=AgentType.OPENAI_FUNCTIONS,
         handle_parsing_errors=True,
