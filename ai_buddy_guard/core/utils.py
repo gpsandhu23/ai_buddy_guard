@@ -312,3 +312,22 @@ def incident_extractor_tool(report):
         print(f"Warning: Could not parse JSON content: {content}")
         print(f"Content that caused the error: {report}")
         return None
+    
+def generate_threat_model(page_content):
+    """
+    This function generates a threat model based on the provided page content.
+
+    Args:
+        page_content (str): The content of the page for which to generate a threat model.
+
+    Returns:
+        str: The generated threat model.
+    """
+    prompt = "You are a cybersecurity expert. You job is to understand what the user is building, Identify what can go wrong and how to prevent it: " + str(page_content)
+    try:
+        threat_model = llm.predict(prompt)
+        return threat_model
+    except Exception as e:
+        logging.error(f"Error occurred while generating threat model: {e}")
+        return None
+        

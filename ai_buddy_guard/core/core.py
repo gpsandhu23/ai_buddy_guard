@@ -22,7 +22,8 @@ from .utils import (
     is_bucket_public,
     scan_git_secrets,
     extract_content_from_url,
-    incident_extractor_tool
+    incident_extractor_tool,
+    generate_threat_model
 
 )
 # Initialize logging
@@ -218,6 +219,35 @@ def check_cve_in_kev(cve_string: str) -> Union[List[str], str]:
 
     return exploited_cves
 
+@tool
+def threat_model(url: str) -> str:
+    """
+    This function generates a threat model for a given URL.
+    
+    It first retrieves the content from the URL using the get_content_from_url function. 
+    Then, it passes the retrieved content to the generate_threat_model function to generate the threat model.
+    
+    Parameters:
+    url (str): The URL for which to generate the threat model.
+    
+    Returns:
+    threat_model (str): The generated threat model.
+    """
+    try:
+        content = extract_content_from_url(url)
+    except Exception as e:
+        logging.error(f"Error occurred while getting content from URL: {e}")
+        return f"Error occurred while getting content from URL: {e}"
+
+    try:
+        threat_model = generate_threat_model(content)
+    except Exception as e:
+        logging.error(f"Error occurred while generating threat model: {e}")
+        return f"Error occurred while generating threat model: {e}"
+
+    return threat_model
+
+    
 
 def run_ai_bot(user_input):
     """
@@ -237,7 +267,7 @@ def run_ai_bot(user_input):
 
     agent= initialize_agent(
         tools + [check_credentials_in_repo] + [check_git_depdency_cves] + [get_public_buckets] + [check_aws_mfa] 
-        + [invalidate_aws_key] + [extract_incident_schema] + [check_cve_in_kev], 
+        + [invalidate_aws_key] + [extract_incident_schema] + [check_cve_in_kev] + [threat_model], 
         llm, 
         agent=AgentType.OPENAI_FUNCTIONS,
         handle_parsing_errors=True,
