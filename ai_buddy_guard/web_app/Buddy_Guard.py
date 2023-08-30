@@ -1,6 +1,7 @@
 # Standard library imports
 from contextlib import contextmanager, redirect_stdout
 from io import StringIO
+import re
 
 # Third-party imports
 import streamlit as st
@@ -59,31 +60,44 @@ def customize_css():
 # Call the function to set up the page
 setup_page()
 
-# Input for git repository URL
-user_instruction = st.text_input('What would you like to do?')
-# When the Check button is pressed
+def strip_ansi_escape_sequences(text):
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    return ansi_escape.sub('', text)
+
+
+# Request user input for task instruction
+user_instruction = st.text_input('Enter your task instruction:')
+# Check if the 'Start AI Agent' button is pressed
 if st.button('Start AI Agent'):
-    if user_instruction:
-        
-        @contextmanager
-        def st_capture(output_func):
-            with StringIO() as stdout, redirect_stdout(stdout):
-                old_write = stdout.write
-
-                def new_write(string):
-                    ret = old_write(string)
-                    output_func(stdout.getvalue())
-                    return ret
-                
-                stdout.write = new_write
-                yield
-
-        output = st.empty()
-        with st_capture(output.code):
-            # Pass the user input to run the AI Agent
-            result = process_user_task(user_instruction)
-
-        # Print results in a success block
-        st.success(result)
-    else:
-        st.error('Please enter a git repository URL')
+     # Check if user instruction is provided
+     if user_instruction:
+         # Context manager to capture stdout and stderr
+         @contextmanager
+         def st_capture(output_func):
+             with StringIO() as stdout, redirect_stdout(stdout):
+                 old_write = stdout.write
+                 # New write function to clean and output the string
+                 def new_write(string):
+                     ret = old_write(string)
+                     clean_string = strip_ansi_escape_sequences(stdout.getvalue())
+                     output_func(clean_string)
+                     return ret
+                 stdout.write = new_write
+                 yield
+         # Placeholder for output
+         output = st.empty()
+         # Capture the output of the AI agent process
+         with st_capture(output.code):
+             # Execute the AI agent process with user instruction
+             try:
+                 result = process_user_task(user_instruction)
+             except Exception as e:
+                 result = f"An error occurred while processing your task: {str(e)}"
+         # Display the result in a success block if no exception occurred
+         if "An error occurred" not in result:
+             st.success(result)
+         else:
+             st.error(result)
+     else:
+         # Display error message if no user instruction is provided
+         st.error('Please enter your task instruction.')
