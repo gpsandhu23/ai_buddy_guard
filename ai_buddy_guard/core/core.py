@@ -29,6 +29,9 @@ from .utils import (
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
 
+# Initialize LLM
+llm = ChatOpenAI(temperature=0)
+
 @tool
 def check_credentials_in_repo(git_repo: str) -> str:
     """
@@ -247,7 +250,81 @@ def threat_model(url: str) -> str:
 
     return threat_model
 
+def check_tools_for_agent() -> str:
+    """
+    This function checks the available tools for the AI agent.
     
+    It runs the AI bot with the instruction "What tools do you have available?" and returns the list of available tools.
+    
+    Returns:
+    tools_list (str): The list of available tools for the AI agent.
+    """
+    try:
+        tools_list = run_ai_bot("What tools do you have available?")
+        return tools_list
+    except Exception as e:
+        logging.error(f"Error occurred while checking tools for agent: {e}")
+        return f"Error occurred while checking tools for agent: {e}"
+
+def check_tool_viability(task: str) -> str:
+    """
+    This function checks the viability of a task with the available tools.
+    
+    It runs the AI bot with the instruction "Can {task} be successfully completed by the following tools: {tools_available}?"
+    and returns the result in JSON format.
+    
+    Parameters:
+    task (str): The task to check viability for.
+    
+    Returns:
+    tool_viability (str): The result of the viability check in JSON format.
+    """
+    try:
+        agent_instruction = task
+        tools_available = check_tools_for_agent()
+        prompt = f"Can {agent_instruction} be successfully completed by the following tools: {tools_available}"
+        output_format_shot = """
+        Please return the response in JSON format
+        {"viable tool available": "Yes", "viable tool": "check_slack_secrets"}
+        {"viable tool available": "No", "viable tool": "None"}
+        """
+        tool_viability = llm.predict(prompt + output_format_shot)
+        return tool_viability
+    except Exception as e:
+        logging.error(f"Error occurred while checking tool viability: {e}")
+        return f"Error occurred while checking tool viability: {e}"
+
+def process_user_task(task: str) -> str:
+    """
+    This function processes a user task by checking the viability of the task with available tools.
+    If a viable tool is found, it runs the AI bot with the task and returns the result.
+    If no viable tool is found, it returns a message indicating that no viable tool is available for the task.
+    
+    Parameters:
+    task (str): The user task to process.
+    
+    Returns:
+    result (str): The result of the processed task or a message indicating that no viable tool is available for the task.
+    """
+    try:
+        tool_viability = check_tool_viability(task)
+        tool_viability_dict = json.loads(tool_viability)
+    except Exception as e:
+        logging.error(f"Error occurred while checking tool viability: {e}")
+        return f"Error occurred while checking tool viability: {e}"
+
+    if tool_viability_dict.get("viable tool available") == "Yes":
+        print(f"Viable tool found: {tool_viability_dict['viable tool']}")
+        try:
+            result = run_ai_bot(task)
+        except Exception as e:
+            logging.error(f"Error occurred while running AI bot: {e}")
+            return f"Error occurred while running AI bot: {e}"
+        return result
+    else:
+        logging.info("Viable tool not found for task: ", task)
+        return "No viable tool for this task"
+
 
 def run_ai_bot(user_input):
     """
@@ -262,7 +339,6 @@ def run_ai_bot(user_input):
     result: The result of the executed instruction.
     """
     agent_instruction = user_input
-    llm = ChatOpenAI(temperature=0)
     tools = load_tools([], llm=llm)
 
     agent= initialize_agent(

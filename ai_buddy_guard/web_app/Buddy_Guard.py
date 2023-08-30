@@ -9,7 +9,7 @@ from streamlit_extras.app_logo import add_logo
 from streamlit_extras.colored_header import colored_header
 
 # Local imports
-from ai_buddy_guard.core.core import run_ai_bot
+from ai_buddy_guard.core.core import process_user_task
 
 
 def setup_page():
@@ -81,7 +81,7 @@ if st.button('Start AI Agent'):
         output = st.empty()
         with st_capture(output.code):
             # Pass the user input to run the AI Agent
-            result = run_ai_bot(user_instruction)
+            result = process_user_task(user_instruction)
 
         # Print results in a success block
         st.success(result)
