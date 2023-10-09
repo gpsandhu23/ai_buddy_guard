@@ -3,6 +3,7 @@ import json
 import logging
 import os
 from typing import List, Union
+import importlib.util
 
 # Third-party imports
 import boto3
@@ -23,7 +24,9 @@ from .utils import (
     scan_git_secrets,
     extract_content_from_url,
     incident_extractor_tool,
-    generate_threat_model
+    generate_threat_model,
+    generate_required_tools_code
+
 
 )
 # Initialize logging
@@ -266,6 +269,9 @@ def check_tools_for_agent() -> str:
         logging.error(f"Error occurred while checking tools for agent: {e}")
         return f"Error occurred while checking tools for agent: {e}"
 
+
+
+
 def check_tool_viability(task: str) -> str:
     """
     This function checks the viability of a task with the available tools.
@@ -282,7 +288,7 @@ def check_tool_viability(task: str) -> str:
     try:
         agent_instruction = task
         tools_available = check_tools_for_agent()
-        prompt = f"Can {agent_instruction} be successfully completed by the following tools: {tools_available}"
+        prompt = f"Can {agent_instruction} be successfully completed by the following tools: {tools_available}. If not, what type of new_tool would be needed to perform this task"
         output_format_shot = """
         Please return the response in JSON format
         {"viable tool available": "Yes", "viable tool": "check_slack_secrets"}
@@ -294,18 +300,13 @@ def check_tool_viability(task: str) -> str:
         logging.error(f"Error occurred while checking tool viability: {e}")
         return f"Error occurred while checking tool viability: {e}"
 
+def load_generated_tools(file_path):
+    spec = importlib.util.spec_from_file_location("ai_generated_custom_tools", file_path)
+    ai_tools = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ai_tools)
+    return [attr for name, attr in ai_tools.__dict__.items() if callable(attr)]
+
 def process_user_task(task: str) -> str:
-    """
-    This function processes a user task by checking the viability of the task with available tools.
-    If a viable tool is found, it runs the AI bot with the task and returns the result.
-    If no viable tool is found, it returns a message indicating that no viable tool is available for the task.
-    
-    Parameters:
-    task (str): The user task to process.
-    
-    Returns:
-    result (str): The result of the processed task or a message indicating that no viable tool is available for the task.
-    """
     try:
         tool_viability = check_tool_viability(task)
         tool_viability_dict = json.loads(tool_viability)
@@ -313,6 +314,7 @@ def process_user_task(task: str) -> str:
         logging.error(f"Error occurred while checking tool viability: {e}")
         return f"Error occurred while checking tool viability: {e}"
 
+    # Check if a viable tool is available
     if tool_viability_dict.get("viable tool available") == "Yes":
         print(f"Viable tool found: {tool_viability_dict['viable tool']}")
         try:
@@ -322,11 +324,25 @@ def process_user_task(task: str) -> str:
             return f"Error occurred while running AI bot: {e}"
         return result
     else:
-        logging.info("Viable tool not found for task: ", task)
-        return "No viable tool for this task"
+        logging.info(f"Viable tool not found for task: {task}")
+        
+        # Generate, save, and load the new tool
+        new_tool_file = generate_required_tools_code(task)
+        generated_tools = load_generated_tools(new_tool_file)
+        print("Loaded tools:", generated_tools)
+
+        
+        # Re-run the AI bot with the new tools
+        try:
+            result = run_ai_bot("What tools do you have access to", additional_tools=generated_tools)  # Modify run_ai_bot to accept additional tools
+        except Exception as e:
+            logging.error(f"Error occurred while running AI bot with new tools: {e}")
+            return f"Error occurred while running AI bot with new tools: {e}"
+        
+        return f"New tool generated and task executed. Result: {result}"
 
 
-def run_ai_bot(user_input):
+def run_ai_bot(user_input, additional_tools=None):
     """
     This function initializes and runs the AI bot with a set of predefined tools. 
     These tools include checking credentials in a repository, checking for outdated dependencies in a git repository,
@@ -338,8 +354,13 @@ def run_ai_bot(user_input):
     Returns:
     result: The result of the executed instruction.
     """
+    if additional_tools is None:
+        additional_tools = []
+    
     agent_instruction = user_input
-    tools = load_tools([], llm=llm)
+    existing_tools = load_tools([], llm=llm)
+
+    tools = existing_tools + additional_tools
 
     agent= initialize_agent(
         tools + [check_credentials_in_repo] + [check_git_depdency_cves] + [get_public_buckets] + [check_aws_mfa] 

@@ -323,11 +323,75 @@ def generate_threat_model(page_content):
     Returns:
         str: The generated threat model.
     """
-    prompt = "You are a cybersecurity expert. You job is to understand what the user is building, Identify what can go wrong and how to prevent it: " + str(page_content)
+    prompt = "You are a cybersecurity expert. You job is to understand what the user is building, Identify what can go wrong and how to prevent: " + str(page_content)
     try:
         threat_model = llm.predict(prompt)
         return threat_model
     except Exception as e:
         logging.error(f"Error occurred while generating threat model: {e}")
         return None
-        
+
+def generate_required_tools_code(task_description):
+    """This function uses OpenAI to generate code for all the Python functions needed for a task"""
+    # Identify the required tools for the task
+    tool_info = identify_required_tools(task_description)
+
+    # Convert the tool info from JSON to a list of function definitions
+    try:
+        function_definitions = json.loads(tool_info)
+    except json.JSONDecodeError as e:
+        print(f"An error occurred while decoding the JSON: {str(e)}")
+        return
+    except Exception as e:
+        print(f"An unexpected error occurred: {str(e)}")
+        return
+
+    # Generate the code for each function
+    code_for_all_tools = ""
+    for function_definition in function_definitions:
+        try:
+            generated_code = generate_function_code(str(function_definition))
+            code_for_all_tools += generated_code + "\n\n"
+        except Exception as e:
+            print(f"An error occurred while generating code: {str(e)}")
+
+    # Write the generated code to a new file
+    file_name = 'ai_buddy_guard/core/ai_generated_custom_tools.py'
+    with open(file_name, 'w') as file:
+        file.write(code_for_all_tools)
+    return file_name
+
+def identify_required_tools(task_description):
+    """This function uses OpenAI to generate information about Python functions needed for a task"""
+    task_prompt = """Your job is to figure out what kind of Python functions will be needed to accoplish a task from the user
+    Provide the names for the functions and what they would need to do
+    Provide the type of input and output the function would need to have
+    Don't generate the code for it
+    Please generate the output as a list of JSON objects
+    Task:"""
+    complete_prompt = task_prompt + task_description
+    tool_info = llm.predict(complete_prompt)
+    return tool_info
+
+def generate_function_code(function_description):
+    """This function uses OpenAI to generate code ouput"""
+    code_prompt = """You job is to generate Python function code for what the user wants to achieve
+    The code should be production ready with error handling inside the function
+    It should be as broad as possible to solve the entire problem instead of just a small subset
+    Only return the code, please never add any commentary around the code in the response
+    Please apply an already existing custom decorator '@tool' to any function you generate
+    Please add a well written docstring that starts with information about when this function should be used
+    Please add type annotation in the function definition
+    Please add this import "from langchain.tools import tool"
+    User wants to """
+    complete_code_prompt = code_prompt + function_description
+    generated_code = llm.predict(complete_code_prompt)
+    clean_code = remove_python_block_markers(generated_code)
+    return clean_code
+
+def remove_python_block_markers(code_block):
+    code_without_start_marker = re.sub(r'```python\n', '', code_block)
+    clean_code = re.sub(r'```', '', code_without_start_marker)
+    return clean_code
+
+
