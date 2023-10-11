@@ -14,6 +14,7 @@ Buddy Guard is a prototype AI agent to test how well AI can help us find and fix
 - **Check CVE in KEV list**: Check if a CVE is in the CISA KEV list
 - **Threat model**: Generate a basic threat model for a service given a url to documentation
 - **Invalidate AWS Key**: Invalite an AWS key if it has been compromised
+- **Webpage phishing check**: Check if a URL is a phishing webpage based on content, WHOIS records, TLS cert info and DNS records
 
 ## Installation
 
