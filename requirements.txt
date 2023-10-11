@@ -10,3 +10,10 @@ boto3
 slack_sdk
 beautifulsoup4
 pandas
+tldextract
+dnspython
+pyOpenSSL
+tiktoken
+python-whois
+python-dotenv
+pyppeteer

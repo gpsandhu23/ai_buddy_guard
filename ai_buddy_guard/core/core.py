@@ -14,6 +14,7 @@ from langchain.agents import AgentType, initialize_agent, load_tools
 from langchain.chat_models import ChatOpenAI
 from langchain.tools import StructuredTool, tool
 import pandas as pd
+import tldextract
 
 # Local (or relative) imports
 from .utils import (
@@ -25,9 +26,12 @@ from .utils import (
     extract_content_from_url,
     incident_extractor_tool,
     generate_threat_model,
-    generate_required_tools_code
-
-
+    generate_required_tools_code,
+    extract_elements,
+    fetch_dns_records,
+    fetch_tls_certificate,
+    analyze_whois,
+    phishing_insights_extractor_tool
 )
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
@@ -253,6 +257,36 @@ def threat_model(url: str) -> str:
 
     return threat_model
 
+@tool
+def extract_phishing_insights(url: str) -> str:
+    """
+    This function extracts phishing insights for a given URL.
+    
+    It first extracts the domain and host from the URL. Then, it retrieves the rendered content, DNS record, 
+    TLS record, and WHOIS records for the domain. These records are then passed to the phishing_insights_extractor_tool 
+    function to generate the phishing insights.
+    
+    Parameters:
+    url (str): The URL for which to extract phishing insights.
+    
+    Returns:
+    phishing_insights (str): The extracted phishing insights.
+    """
+    try:
+        extracted = tldextract.extract(url)
+        domain = f"{extracted.domain}.{extracted.suffix}"
+        host = f"{extracted.subdomain}.{domain}" if extracted.subdomain else domain
+        rendered_content = extract_elements(url)
+        dns_record = fetch_dns_records(domain)
+        tls_record = fetch_tls_certificate(host)
+        who_is_records = analyze_whois(domain)
+        input = url + str(dns_record) + str(tls_record) + str(who_is_records) + str(rendered_content)
+        phishing_insights = phishing_insights_extractor_tool(input)
+        return phishing_insights
+    except Exception as e:
+        logging.error(f"Error occurred while extracting phishing insights: {e}")
+        return f"Error occurred while extracting phishing insights: {e}"
+
 def check_tools_for_agent() -> str:
     """
     This function checks the available tools for the AI agent.
@@ -268,9 +302,6 @@ def check_tools_for_agent() -> str:
     except Exception as e:
         logging.error(f"Error occurred while checking tools for agent: {e}")
         return f"Error occurred while checking tools for agent: {e}"
-
-
-
 
 def check_tool_viability(task: str) -> str:
     """
@@ -364,7 +395,7 @@ def run_ai_bot(user_input, additional_tools=None):
 
     agent= initialize_agent(
         tools + [check_credentials_in_repo] + [check_git_depdency_cves] + [get_public_buckets] + [check_aws_mfa] 
-        + [invalidate_aws_key] + [extract_incident_schema] + [check_cve_in_kev] + [threat_model], 
+        + [invalidate_aws_key] + [extract_incident_schema] + [check_cve_in_kev] + [threat_model] + [extract_phishing_insights], 
         llm, 
         agent=AgentType.OPENAI_FUNCTIONS,
         handle_parsing_errors=True,

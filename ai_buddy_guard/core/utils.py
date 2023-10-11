@@ -18,8 +18,21 @@ from github import Github
 from bs4 import BeautifulSoup
 from langchain.chat_models import ChatOpenAI
 from langchain.schema import HumanMessage
+import socket
+import asyncio
+import dns.resolver
+import OpenSSL
+import tiktoken
+import whois
+from dotenv import load_dotenv, find_dotenv
+from pyppeteer import launch
+from pyppeteer.errors import TimeoutError
 
-# Local module imports
+# Setup the encoding for tiktoken and llm settings for lanchain
+encoding = tiktoken.get_encoding("cl100k_base")
+llm_model = "gpt-4-0613"
+temperature = 0
+llm = ChatOpenAI(model=llm_model, temperature=temperature)
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
@@ -231,10 +244,6 @@ def extract_content_from_url(url):
         print('Failed to fetch the webpage. Status code:', response.status_code)
         return None
 
-llm_model = "gpt-4-0613"
-temperature = 0
-llm = ChatOpenAI(model=llm_model, temperature=temperature)
-
 incident_schema = [
             {
                 "name": "Incident_schema_extractor",
@@ -330,6 +339,296 @@ def generate_threat_model(page_content):
     except Exception as e:
         logging.error(f"Error occurred while generating threat model: {e}")
         return None
+
+def check_url_exists(domain):
+    """
+    This function checks if a given domain exists by sending a GET request.
+
+    Args:
+        domain (str): The domain to check.
+
+    Returns:
+        str: "Yes" if the domain exists, "No" otherwise.
+    """
+    if not domain.startswith(('http://', 'https://')):
+        domain = "http://" + domain
+    try:
+        response = requests.get(domain, timeout=5)  # 5 seconds timeout
+        if response.status_code == 200:
+            return "Yes"
+        else:
+            return "No"
+    except Exception as e:
+        logging.error(f"Error occurred while checking URL existence: {e}")
+        return "No"
+
+def fetch_dns_records(domain):
+    """
+    This function fetches the DNS records of a given domain.
+
+    Args:
+        domain (str): The domain to fetch the DNS records for.
+
+    Returns:
+        dict: A dictionary containing the DNS records.
+    """
+    record_data = {}
+    
+    # Fetch A records
+    try:
+        answers = dns.resolver.resolve(domain, 'A')
+        record_data['A'] = [answer.address for answer in answers]
+    except Exception as e:
+        logging.error(f"An error occurred fetching A records: {e}")
+        
+    # Fetch CNAME records
+    try:
+        answers = dns.resolver.resolve(domain, 'CNAME')
+        record_data['CNAME'] = [answer.target.to_text() for answer in answers]
+    except Exception as e:
+        logging.error(f"An error occurred fetching CNAME records: {e}")
+
+    return record_data
+
+def fetch_tls_certificate(host, port=443):
+    """
+    This function fetches the TLS certificate of a given host.
+
+    Args:
+        host (str): The host to fetch the TLS certificate for.
+        port (int, optional): The port to connect to. Defaults to 443.
+
+    Returns:
+        dict: A dictionary containing the TLS certificate details.
+    """
+    cert_details = {}
+    
+    try:
+        # Create a socket and wrap it with SSL
+        conn = socket.create_connection((host, port))
+        context = OpenSSL.SSL.Context(OpenSSL.SSL.TLSv1_2_METHOD)
+        sock = OpenSSL.SSL.Connection(context, conn)
+        
+        # Connect and fetch certificate
+        sock.set_connect_state()
+        sock.set_tlsext_host_name(host.encode())
+        sock.do_handshake()
+        cert = sock.get_peer_certificate()
+        
+        # Extract certificate details
+        cert_details['issuer'] = cert.get_issuer().get_components()
+        cert_details['subject'] = cert.get_subject().get_components()
+        cert_details['expiration_date'] = cert.get_notAfter().decode('ascii')
+        
+        # Close the connection
+        conn.close()
+        
+        return cert_details, None
+
+    except socket.gaierror:
+        logging.error("Could not resolve host")
+        return None, "Could not resolve host"
+    except socket.timeout:
+        logging.error("Connection timed out")
+        return None, "Connection timed out"
+    except OpenSSL.SSL.Error as e:
+        logging.error(f"SSL error: {e}")
+        return None, f"SSL error: {e}"
+    except Exception as e:
+        logging.error(f"An unexpected error occurred: {e}")
+        return None, f"An unexpected error occurred: {e}"
+
+def analyze_whois(domain):
+    """
+    This function analyzes the WHOIS record of a given domain.
+
+    Args:
+        domain (str): The domain to analyze the WHOIS record for.
+
+    Returns:
+        dict: A dictionary containing the WHOIS record analysis.
+    """
+    analysis = {}
+    try:
+        w = whois.whois(domain)
+        
+        # Analyzing Registration Date
+        if w.creation_date:
+            if isinstance(w.creation_date, list):
+                creation_date = w.creation_date[0]
+            else:
+                creation_date = w.creation_date
+            
+            age = (datetime.now() - creation_date).days
+            analysis['Domain_Age_In_Days'] = age
+
+        # Analyzing Registrar
+        if w.registrar:
+            analysis['Domain_Registrar'] = w.registrar
+        
+        # Analyzing Country
+        if w.country:
+            analysis['Domain_Registered_Country'] = w.country
+
+    except Exception as e:
+        logging.error(f"An error occurred during WHOIS analysis: {e}")
+        analysis['Error_Message'] = str(e)
+        
+    return analysis
+
+def truncate_to_max_tokens(text, encoding, max_tokens=7500):
+    """
+    This function truncates a given text to a maximum number of tokens.
+
+    Args:
+        text (str): The text to truncate.
+        encoding (Encoding): The encoding to use for tokenization.
+        max_tokens (int, optional): The maximum number of tokens. Defaults to 7500.
+
+    Returns:
+        str: The truncated text.
+    """
+    token_integers = encoding.encode(text)
+    if len(token_integers) > max_tokens:
+        truncated_tokens = token_integers[:max_tokens]
+        truncated_text = encoding.decode(truncated_tokens)
+        return truncated_text
+    else:
+        return text
+
+
+phishing_page_insights_schema = [
+            {
+                "name": "phishing_page_insights_extractor",
+                "description": "Extract information if a webpage is a potential phishing page",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "likelihood": {
+                            "type": "string",
+                            "description": "What is the likelihood this is a phishing page",
+                            "enum": ["High", "Medium", "Low", "Unknown"]
+                        },
+                        "likelihood_explanation": {
+                            "type": "string",
+                            "description": "The explanation for why the likelihood was  or 'Unknown' if it is not clear"
+                        },
+                    },
+                    "required": ["likelihood", "likelihood_explanation"],
+                }
+            }
+        ]
+
+def phishing_insights_extractor_tool(report):
+    """
+    This function extracts phishing insights from a given report.
+
+    Args:
+        report (str): The report to extract insights from.
+
+    Returns:
+        dict: A dictionary containing the extracted insights.
+    """
+    # Get the token count
+    token_integers = encoding.encode(report)
+    num_tokens = len(token_integers)
+    logging.info(f"Token count for input: {num_tokens}")
+    
+    # Truncate if needed
+    if num_tokens > 7500:
+        report = truncate_to_max_tokens(report, encoding, max_tokens=7500)
+        
+    first_response = llm.predict_messages([HumanMessage(content=report)],
+                                          functions=phishing_page_insights_schema)
+
+    content = first_response.content
+    function_call = first_response.additional_kwargs.get('function_call')
+
+    if function_call is not None:
+        content = function_call.get('arguments', content)
+
+    try:
+        content_dict = json.loads(content)
+        logging.info("Content dict: ", content_dict)
+        return content_dict
+    except json.JSONDecodeError:
+        logging.error(f"Warning: Could not parse JSON content: {content}")
+        logging.error(f"Content that caused the error: {report}")
+        return None
+
+def extract_elements(url):
+    """
+    This function extracts elements from a given URL.
+
+    Args:
+        url (str): The URL to extract elements from.
+
+    Returns:
+        dict: A dictionary containing the extracted elements.
+    """
+    browser = None
+    try:
+        browser = launch()
+        page = browser.newPage()
+        try:
+            page.goto(url)
+        except TimeoutError:
+            logging.error(f"Timeout while navigating to {url}. Skipping...")
+            browser.close()
+            return None
+        except Exception as e:
+            logging.error(f"An error occurred while navigating to {url}: {e}")
+            browser.close()
+            return None
+
+        sleep(5)
+
+        page_text = page.evaluate('document.body.innerText')
+        
+        forms_and_actions = page.evaluate('''() => {
+            return Array.from(document.querySelectorAll("form")).map(form => {
+                return {
+                    'formHTML': form.outerHTML,
+                    'actionURL': form.action
+                };
+            });
+        }''')
+
+        links = page.evaluate('''() => {
+            return Array.from(document.querySelectorAll("a")).map(link => link.href);
+        }''')
+
+        scripts = page.evaluate('''() => {
+            return Array.from(document.querySelectorAll("script")).map(script => script.outerHTML);
+        }''')
+
+        meta_info = page.evaluate('''() => {
+            return Array.from(document.querySelectorAll("meta")).map(meta => meta.getAttribute("name") + "=" + meta.getAttribute("content"));
+        }''')
+
+        title = page.evaluate('''() => {
+            return document.title;
+        }''')
+
+        browser.close()
+
+        extracted_data = {
+            'title': title,
+            'text_content': page_text,
+            'forms_and_actions': forms_and_actions,
+            'links': links,
+            'meta_info': meta_info,
+            'scripts': scripts,
+        }
+
+        return extracted_data
+
+    except Exception as e:
+        logging.error(f"An unexpected error occurred: {e}")
+        if browser:
+            browser.close()
+        return None
+
 
 def generate_required_tools_code(task_description):
     """This function uses OpenAI to generate code for all the Python functions needed for a task"""
