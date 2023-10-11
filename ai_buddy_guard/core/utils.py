@@ -630,6 +630,479 @@ def extract_elements(url):
         return None
 
 
+# Add functions for GPT code scan and fix application
+def clone_repo(repo_url: str, directory: str, token: str) -> None:
+    """
+    Clones a repository from the given URL to the specified directory.
+
+    :param repo_url: The URL of the repository to clone.
+    :param directory: The directory to clone the repository into.
+    :param token: The token to use for authentication.
+    """
+    if os.path.exists(directory):
+        shutil.rmtree(directory)
+    try:
+        # Set the token as an environment variable
+        os.environ['GIT_ASKPASS'] = 'echo'
+        os.environ['GIT_USERNAME'] = token
+        
+        # Clone the repository
+        subprocess.check_call(['git', 'clone', repo_url, directory])
+        logging.info(f"Cloned repository {repo_url} to {directory}")
+
+        # Check and print the current branch
+        current_branch = subprocess.check_output(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], cwd=directory)
+        logging.info(f"Current branch: {current_branch.decode('utf-8').strip()}")
+    except Exception as e:
+        logging.error(f"Failed to clone the repository: {e}")
+
+
+def get_file_paths(directory: str) -> List[str]:
+    """
+    Gets the paths of all code files in the given directory and its subdirectories.
+
+    :param directory: The directory to search for code files.
+    :return: A list of paths to the code files.
+    """
+    code_extensions = {'.java', '.js', '.py', '.rb', '.go', '.cpp', '.ts', '.cs', '.php', '.m', '.swift', '.kt', '.rs', '.scala', '.c', '.h', '.hpp', '.pl', '.sh', '.bash', '.html'}
+    file_paths = []
+    try:
+        for root, dirs, files in os.walk(directory):
+            if '.git' in dirs:
+                dirs.remove('.git')  # don't visit .git directories
+            for file in files:
+                if any(file.endswith(ext) for ext in code_extensions):  # only analyze code files
+                    file_paths.append(os.path.join(root, file))
+    except Exception as e:
+        logging.error(f"Failed to get file paths: {e}")
+    return file_paths
+
+
+def get_code_from_file(file_path):
+    """
+    Reads the code from a file.
+
+    :param file_path: The path to the file.
+    :return: The code in the file.
+    """
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            code = file.read()
+        return code
+    except Exception as e:
+        logging.error(f"Failed to read code from file {file_path}: {e}")
+        return None
+
+
+function_descriptions = [
+            {
+                "name": "find_security_issues_and_generate_fix",
+                "description": "Scan the code and find any security vulnerabilities and generate code fix",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "vulnerability found": {
+                            "type": "string",
+                            "description": " 'Yes' if there is a security vulnerability in code or 'No' if the code doesn't have security vulnerability",
+                        },
+                        "vulnerability": {
+                            "type": "string",
+                            "description": "The type of vulnerability found in the code or 'None' "
+                        },
+                        "vulnerable code": {
+                            "type": "string",
+                            "description": "The code that is vulnerable to the security issue or 'None' "
+                        },
+                        "code fix": {
+                            "type": "string",
+                            "description": "Code fix for the vulnerable code or 'None' "
+                        },
+                        "comment": {
+                            "type": "string",
+                            "description": "Comment that describes the issue and fix or 'No issues found' "
+                        },
+                    },
+                    "required": ["vulnerability found", "vulnerability", "vulnerable code", "code fix", "comment"],
+                },
+            }
+        ]
+
+
+def static_analysis_tool(code):
+    """
+    Analyzes the given code for security vulnerabilities.
+
+    :param code: The code to analyze.
+    :return: A dictionary containing the analysis results.
+    """
+    try:
+        first_response = llm.predict_messages([HumanMessage(content=code)],
+                                              functions=function_descriptions)
+
+        content = first_response.content
+        function_call = first_response.additional_kwargs.get('function_call')
+
+        if function_call is not None:
+            content = function_call.get('arguments', content)
+
+        content_dict = json.loads(content)
+        logging.info("Content dict: ", content_dict)
+        return content_dict
+    except json.JSONDecodeError:
+        logging.error(f"Warning: Could not parse JSON content: {content}")
+        logging.error(f"Code that caused the error: {code}")
+        return None
+    except Exception as e:
+        logging.error(f"Failed to analyze code: {e}")
+        return None
+
+
+def chunk_code_by_line(code: str, max_line_count: int = 100):
+    """
+    Splits the given code into chunks of a maximum number of lines.
+
+    :param code: The code to split.
+    :param max_line_count: The maximum number of lines in each chunk.
+    :return: A list of code chunks.
+    """
+    lines = code.splitlines()
+    chunks = []
+
+    for i in range(0, len(lines), max_line_count):
+        chunk_lines = lines[i:i+max_line_count]
+        chunk = '\n'.join(chunk_lines)
+        chunks.append(chunk)
+
+    return chunks
+
+
+def remove_comments(code):
+    """
+    Removes comments from the given code.
+
+    :param code: The code to remove comments from.
+    :return: The code without comments.
+    """
+    try:
+        # Remove block comments
+        code = re.sub(r'/\*.*?\*/', '', code, flags=re.DOTALL)
+        # Remove line comments
+        code = re.sub(r'//.*', '', code)
+        return code
+    except Exception as e:
+        logging.error(f"Failed to remove comments from code: {e}")
+        return code
+
+
+def analyze_file(file_path: str, max_line_count: int = 100):
+    """
+    Analyzes the code in a file for security vulnerabilities.
+
+    :param file_path: The path to the file.
+    :param max_line_count: The maximum number of lines in each chunk of code to analyze.
+    :return: A list of dictionaries containing the analysis results for each chunk of code.
+    """
+    try:
+        with open(file_path, 'r') as file:
+            code = file.read()
+        file_name = os.path.basename(file_path)
+        logging.info("Scanning file: ", file_name)
+
+        analysis_results = []
+        for chunk in chunk_code_by_line(code, max_line_count):
+            analysis_result = static_analysis_tool(chunk)
+            if analysis_result is None:
+                logging.warning(f"No analysis result for chunk: {chunk}")
+                continue
+            analysis_result["file_name"] = file_name
+            analysis_results.append(analysis_result)
+
+        return analysis_results
+    except Exception as e:
+        logging.error(f"Failed to analyze file {file_path}: {e}")
+        return []
+
+
+def write_results_to_file(analysis_results, output_file):
+    """
+    Writes the analysis results to a file.
+
+    :param analysis_results: The analysis results to write.
+    :param output_file: The file to write the results to.
+    """
+    try:
+        with open(output_file, 'a') as f:
+            for result in analysis_results:
+                f.write(json.dumps(result) + '\n')
+        # Clear the results list
+        analysis_results.clear()
+    except Exception as e:
+        logging.error(f"Failed to write results to file {output_file}: {e}")
+
+
+def analyze_all_files(file_paths, output_file, chunk_size=10, max_code_size=100):
+    """
+    Analyzes the code in all files for security vulnerabilities.
+
+    :param file_paths: The paths to the files.
+    :param output_file: The file to write the results to.
+    :param chunk_size: The number of files to analyze before writing the results to the file.
+    :param max_code_size: The maximum number of lines in each chunk of code to analyze.
+    """
+    analysis_results = []
+    for i, file_path in enumerate(file_paths):
+        analysis_results.extend(analyze_file(file_path, max_code_size))
+
+        # If we've reached the chunk size or the end of the file list, write the results to the file
+        if (i + 1) % chunk_size == 0 or i == len(file_paths) - 1:
+            write_results_to_file(analysis_results, output_file)
+
+    logging.info(f"Analysis results written to {output_file}")
+
+
+def get_output_file(git_url):
+    """
+    Gets the output file name based on the given Git URL.
+
+    :param git_url: The Git URL.
+    :return: The output file name.
+    """
+    try:
+        # Parse the URL
+        parsed_url = urlparse(repo_url)
+
+        # Split the path into components and extract the user and repository
+        components = parsed_url.path.split('/')
+        user = components[1]
+        repository = components[2]
+
+        # Combine the user and repository into the output file name
+        output_file = f"{user}-{repository}.json"
+        return output_file
+    except Exception as e:
+        logging.error(f"Failed to get output file for Git URL {git_url}: {e}")
+        return None
+
+
+def fetch_webpage_content(url):
+    """
+    Fetches the content of a webpage.
+
+    :param url: The URL of the webpage.
+    :return: The content of the webpage.
+    """
+    try:
+        response = requests.get(url)
+        return response.text
+    except Exception as e:
+        logging.error(f"Failed to fetch webpage content from URL {url}: {e}")
+        return None
+
+
+def create_branch(branch_name: str) -> None:
+    """
+    Creates a new branch in the local repository.
+
+    :param branch_name: The name of the branch to create.
+    """
+    try:
+        from git import Repo
+        repo = Repo("local/repo")  # Assuming the current directory is the repository root
+        new_branch = repo.create_head(branch_name)
+        new_branch.checkout()
+        logging.info(f"Created branch: {branch_name}")
+    except Exception as e:
+        logging.error(f"Failed to create branch: {e}")
+
+
+def apply_fix(file_path: str, vulnerability_info: dict) -> None:
+    """
+    Applies a fix to the code in a file.
+
+    :param file_path: The path to the file.
+    :param vulnerability_info: A dictionary containing information about the vulnerability and the fix.
+    """
+    try:
+        # Read the entire file into a string
+        with open(file_path, 'r') as file:
+            file_contents = file.read()
+
+        # Replace the vulnerable code with the fix
+        vulnerable_code = vulnerability_info['vulnerable code']
+        fix_code = vulnerability_info['code fix']
+        if vulnerable_code is not None and fix_code is not None:
+            file_contents = file_contents.replace(vulnerable_code, fix_code)
+        else:
+            logging.warning(f"No vulnerable code or code fix found for file {file_path}")
+
+        # Write the modified contents back to the file
+        with open(file_path, 'w') as file:
+            file.write(file_contents)
+            logging.info("File updated with fix")
+
+    except Exception as e:
+        logging.error(f"Failed to apply fix: {e}")
+
+
+def print_git_status(directory):
+    """
+    Prints the Git status of the repository in the given directory.
+
+    :param directory: The directory containing the Git repository.
+    """
+    try:
+        git_status = subprocess.check_output(['git', 'status'], cwd=directory, universal_newlines=True)
+        logging.info(git_status)
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Failed to get git status: {e}")
+
+
+def commit_changes(message: str) -> None:
+    """
+    Commits changes in the local repository.
+
+    :param message: The commit message.
+    """
+    try:
+        from git import Repo
+        repo = Repo("local/repo")  # Assuming the current directory is the repository root
+        repo.index.add("*")  # Add all changes
+        repo.index.commit(message)
+        logging.info("Changes committed")
+    except Exception as e:
+        logging.error(f"Failed to commit changes: {e}")
+
+
+def push_changes(branch_name: str, repo_url: str) -> None:
+    """
+    Pushes changes from the local repository to the remote repository.
+
+    :param branch_name: The name of the branch to push.
+    :param repo_url: The URL of the remote repository.
+    """
+    try:
+        from git import Repo
+        import os
+        import re
+
+        token = os.getenv('github_token')
+        if token is None:
+            logging.error("Failed to get GitHub token")
+            return
+
+        # Infer the GitHub username and repo from the URL
+        match = re.search(r"github.com/(.+)/(.+?)(\.git)?$", repo_url)
+        if match is None:
+            logging.error("Failed to parse GitHub username and repo from URL")
+            return
+
+        username = match.group(1)
+        repo_name = match.group(2)
+
+        repo = Repo("local/repo")
+
+        # Change the URL of the 'origin' remote to include the token
+        repo.remotes.origin.config_writer.set('url', f'https://{token}@github.com/{username}/{repo_name}.git')
+
+        repo.remotes.origin.push(branch_name)
+        logging.info("Changes pushed")
+    except Exception as e:
+        logging.error(f"Failed to push changes: {e}")
+
+
+def open_pull_request(repo_url: str, branch_name: str, title: str, body: str, directory: str) -> None:
+    """
+    Opens a pull request on GitHub.
+
+    :param repo_url: The URL of the repository.
+    :param branch_name: The name of the branch to create the pull request for.
+    :param title: The title of the pull request.
+    :param body: The body of the pull request.
+    :param directory: The directory containing the Git repository.
+    """
+    try:
+        # Extract owner and repository name from URL
+        match = re.search(r"github.com/(.+)/(.+?)(\.git)?$", repo_url)
+        if match:
+            owner = match.group(1)
+            repo = match.group(2)
+        else:
+            logging.error("Failed to parse GitHub username and repo from URL")
+            return
+
+        # Fetch the default branch using git command
+        default_branch = subprocess.check_output(['git', 'symbolic-ref', 'refs/remotes/origin/HEAD'], cwd=directory).decode('utf-8').strip().split('/')[-1]
+
+        # Open a pull request
+        import requests
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/pulls"
+        headers = {
+            "Authorization": f"Bearer {os.getenv('github_token')}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+        payload = {
+            "title": title,
+            "body": body,
+            "head": branch_name,
+            "base": default_branch  # use the default branch
+        }
+        response = requests.post(api_url, headers=headers, json=payload)
+        if response.status_code == 201:
+            logging.info("Pull request created")
+        else:
+            logging.error(f"Failed to open pull request: {response.text}")
+    except Exception as e:
+        logging.error(f"Failed to open pull request: {e}")
+
+
+def checkout_branch(branch_name: str):
+    """
+    Checks out a branch in the local repository.
+
+    :param branch_name: The name of the branch to check out.
+    """
+    try:
+        repo = Repo("local/repo")
+        git = repo.git
+        git.checkout(branch_name)
+    except Exception as e:
+        logging.error(f"Failed to checkout branch {branch_name}: {e}")
+
+
+def process_user_input_url(input_url, directory='local/repo'):
+    """
+    Processes a user input URL to clone a repository and get file paths.
+
+    :param input_url: The user input URL.
+    :param directory: The directory to clone the repository into.
+    :return: A tuple containing a list of file paths and the repository URL.
+    """
+    try:
+        # Parse the URL
+        parsed_url = urlparse(input_url)
+
+        # Get the repository URL
+        repo_url = f"{parsed_url.scheme}://{parsed_url.netloc}" + '/'.join(parsed_url.path.split('/')[:3])
+
+        # Get the subdirectory path
+        subdirectory_path = '/'.join(parsed_url.path.split('/')[5:])
+
+        # Clone the repo
+        github_token = os.getenv('github_token')
+        clone_repo(repo_url, directory, github_token)
+
+        # Specify the subdirectory to scan
+        subdirectory = os.path.join(directory, subdirectory_path)
+
+        # Get file paths within the subdirectory
+        file_paths = get_file_paths(subdirectory)
+
+        return file_paths, repo_url
+    except Exception as e:
+        logging.error(f"Failed to process user input URL {input_url}: {e}")
+        return [], None
+
+
 def generate_required_tools_code(task_description):
     """This function uses OpenAI to generate code for all the Python functions needed for a task"""
     # Identify the required tools for the task

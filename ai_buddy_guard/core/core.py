@@ -2,6 +2,8 @@
 import json
 import logging
 import os
+import time
+import subprocess
 from typing import List, Union
 import importlib.util
 
@@ -31,7 +33,15 @@ from .utils import (
     fetch_dns_records,
     fetch_tls_certificate,
     analyze_whois,
-    phishing_insights_extractor_tool
+    phishing_insights_extractor_tool,
+    process_user_input_url,
+    analyze_file,
+    checkout_branch,
+    create_branch,
+    apply_fix,
+    commit_changes,
+    push_changes,
+    open_pull_request
 )
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
@@ -287,6 +297,55 @@ def extract_phishing_insights(url: str) -> str:
         logging.error(f"Error occurred while extracting phishing insights: {e}")
         return f"Error occurred while extracting phishing insights: {e}"
 
+@tool
+def analyze_and_fix_vulnerabilities(repo_path_url: str) -> str:
+    """
+    This function analyzes and fixes vulnerabilities in a given repository.
+    
+    It first processes the user input URL to get the file paths and repository URL. Then, it checks out the primary branch 
+    and analyzes each file for vulnerabilities. If a vulnerability is found, it checks out the primary branch, creates a new 
+    branch, applies the fix, commits the changes, and pushes the changes to the new branch. Finally, it opens a pull request 
+    with the fix.
+    
+    Parameters:
+    repo_path_url (str): The URL of the repository to analyze and fix.
+    
+    Returns:
+    str: A message indicating the result of the operation.
+    """
+    try:
+        # Ensure the local directory exists
+        directory = 'local/repo'
+        github_token = os.environ.get('github_token')
+
+        file_paths, repo_url = process_user_input_url(repo_path_url)
+        primary_branch = subprocess.check_output(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], cwd=directory)
+        primary_branch = primary_branch.decode('utf-8').strip()
+        logging.info(f"Primary branch: {primary_branch}")
+
+        for i, file_path in enumerate(file_paths):
+            analysis_list = analyze_file(file_path)
+            for analysis in analysis_list:
+                if analysis['vulnerability found'] == 'Yes':
+                    checkout_branch(primary_branch)
+
+                    base_file_name = os.path.basename(file_path)
+                    branch_name = f'fix-{base_file_name}-{i}-{int(time.time())}'
+                    create_branch(branch_name)
+                    
+                    apply_fix(file_path, analysis)
+                    commit_message = f'Fix security issues in {base_file_name}'
+                    commit_changes(commit_message)
+                    
+                    push_changes(branch_name, repo_url) 
+                    pr_title = f'Security Fix for {base_file_name}-{i}-{int(time.time())}'
+                    pr_body = analysis['comment'] + "\n\nVulnerability found and code fix generated using AI powered security tool."
+                    open_pull_request(repo_url, branch_name, pr_title, pr_body, directory)
+        return "Pull Request Created"
+    except Exception as e:
+        logging.error(f"Error occurred while analyzing and fixing vulnerabilities: {e}")
+        return f"Error occurred while analyzing and fixing vulnerabilities: {e}"
+
 def check_tools_for_agent() -> str:
     """
     This function checks the available tools for the AI agent.
@@ -395,7 +454,8 @@ def run_ai_bot(user_input, additional_tools=None):
 
     agent= initialize_agent(
         tools + [check_credentials_in_repo] + [check_git_depdency_cves] + [get_public_buckets] + [check_aws_mfa] 
-        + [invalidate_aws_key] + [extract_incident_schema] + [check_cve_in_kev] + [threat_model] + [extract_phishing_insights], 
+        + [invalidate_aws_key] + [extract_incident_schema] + [check_cve_in_kev] + [threat_model] + [extract_phishing_insights]
+        + [analyze_and_fix_vulnerabilities], 
         llm, 
         agent=AgentType.OPENAI_FUNCTIONS,
         handle_parsing_errors=True,

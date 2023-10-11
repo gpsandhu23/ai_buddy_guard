@@ -15,6 +15,7 @@ Buddy Guard is a prototype AI agent to test how well AI can help us find and fix
 - **Threat model**: Generate a basic threat model for a service given a url to documentation
 - **Invalidate AWS Key**: Invalite an AWS key if it has been compromised
 - **Webpage phishing check**: Check if a URL is a phishing webpage based on content, WHOIS records, TLS cert info and DNS records
+- **Scan and generate code fixes**: Scan code with GPT-4 and autogenerate code fixes. This is still very noisy, needs more work
 
 ## Installation
 
